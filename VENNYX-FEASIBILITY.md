@@ -102,3 +102,30 @@ This directly unblocks Vennyx Mila's `apps/api/src/mta-hook/rule-context.ts::isS
 2. Tag and push the built image to whatever registry Vennyx Mila's deploy pulls from (the OCI prod host per existing Vennyx infra notes) — not GHCR under `stalwartlabs`, obviously; needs a `vennyx-org`-owned image name/tag.
 3. Merge `vennyx/spam-verdict-in-hook` into `vennyx/base` (or keep it as the deploy branch directly) once vennyx-mila's `mta-hook` service is updated to read `context.spam.score`/`context.spam.isSpam` from the payload — coordinate the Rust-side rollout with the vennyx-mila `rule-context.ts::isSpamScoreVerdict` change so they land together.
 4. No CI/release workflow exists yet in the fork for this — will need a Vennyx-side build/push pipeline (could mirror the existing `vennyx-release-v2.12.0.yml`-style workflow already used for other Vennyx forks, per this environment's existing conventions).
+
+**Update (this session): steps 1–4 above are now done.** See "Deployable image" below for the actual branch/workflow/image that resulted.
+
+---
+
+## Deployable image — `vennyx/deploy` branch + `vennyx-image.yml` workflow
+
+**Deployable branch: `vennyx/deploy`.** `vennyx/spam-verdict-in-hook` turned out to already be a fast-forward of `vennyx/base` (base HEAD `5e319d42` is an ancestor of the feature branch, which just adds one commit `ae55e4e0` on top) — so no merge conflict/logic was needed. `vennyx/deploy` was branched directly off `vennyx/spam-verdict-in-hook` (i.e. `v0.16.11` + the one-commit spam-verdict patch) and carries one additional commit adding the CI workflow below. `vennyx/base` and `vennyx/spam-verdict-in-hook` are left untouched as the "pristine upstream pin" and "reviewable feature patch" branches respectively; `vennyx/deploy` is purely "what we build images from."
+
+**Workflow: `.github/workflows/vennyx-image.yml`** (new, additive — does not touch upstream's `ci.yml`/`Dockerfile.build`/`docker-bake.hcl`, which remain for reference/possible future multi-arch use). Design choices:
+- Builds from the repo's existing **top-level `Dockerfile`** (cargo-chef planner → builder → `debian:trixie-slim` runtime), not `Dockerfile.build`. `Dockerfile.build` is upstream's multi-arch pipeline (zig cross-compilation, FoundationDB client fetch, sccache-over-GHA, sccache secrets, sccache/buildkit-cache-dance apt+cargo caching) built for `docker-bake.hcl`'s matrix across 8 target triples — overkill and harder to get green on the first try for our single `linux/amd64`-only need. The plain `Dockerfile` already branches on `$TARGETPLATFORM`/`$BUILDPLATFORM` and needs no zig/FDB/extra secrets; on an `ubuntu-latest` (x86_64) runner building for `linux/amd64` it compiles **natively**, no QEMU emulation. Confirmed via `git log` that this Dockerfile is actively maintained (last touched 2026-05-11, "Docker image improvements" / health-check commits), just not wired into upstream's own CI.
+- `platforms: linux/amd64` only (matches the constraint that we only need x86_64).
+- `provenance: false` on `docker/build-push-action@v6` as instructed.
+- Tags pushed: `ghcr.io/vennyx-org/stalwart:vennyx-<short-sha>` (first 12 hex chars of `github.sha`) and `ghcr.io/vennyx-org/stalwart:vennyx-latest`.
+- Triggers: `workflow_dispatch` (manual) and `push` to `vennyx/deploy`.
+- Log-injection-safe: the only `run:` steps interpolate values via `env:` (`COMMIT_SHA`, `SHORT_SHA`), never via inline `${{ }}` inside a shell string; the SHA-computing step reads `$COMMIT_SHA` as a real env var, not a template-expanded literal.
+- Auth: `secrets.GITHUB_TOKEN` with `permissions: packages: write` on the job — no PAT needed since `vennyx-org/stalwart` and the target package live in the same org/repo.
+
+**Rebasing this fork on a future upstream tag** (e.g. `v0.16.12`+, esp. for CVE fixes — this is the whole point of keeping the patch thin):
+1. `git fetch upstream <new-tag>` (add `https://github.com/stalwartlabs/stalwart.git` as remote `upstream` if not already) — or just `git fetch origin` if GitHub's fork-sync has pulled it.
+2. `git checkout vennyx/base && git merge --ff-only <new-tag>` (should always be a clean fast-forward since `vennyx/base` never carries its own commits beyond the pin).
+3. `git checkout vennyx/spam-verdict-in-hook && git rebase vennyx/base` — the patch touches exactly 7 files (`crates/smtp/src/inbound/{data,ehlo,mail,rcpt,spawn}.rs`, `crates/smtp/src/inbound/hooks/{mod,message}.rs`) with small, additive hunks (new `Spam` struct/field, new `Option<Spam>` parameter threaded through 5 call sites), so conflicts should be rare and mechanical (e.g. a shifted line if upstream also touches `run_mta_hooks`'s signature — resolve by re-adding the `spam: Option<Spam>` parameter in the same position).
+4. `git checkout vennyx/deploy && git reset --hard vennyx/spam-verdict-in-hook && git cherry-pick <the-vennyx-image.yml-commit-sha>` (or just re-branch `vennyx/deploy` fresh off the rebased `vennyx/spam-verdict-in-hook` and re-apply the one workflow-adding commit — it never changes, so a clean cherry-pick is expected).
+5. Push `vennyx/deploy`, which auto-triggers `vennyx-image.yml` and produces a new `vennyx-<short-sha>` image tagged against the new upstream base.
+6. Run `cargo check -p smtp` before pushing to catch any signature drift early (cheap, doesn't need the full release/Docker build).
+
+**Result of the initial run:** see the top of this document's changelog / the report appended after the first successful CI run for the actual image ref, run ID, and build duration.
