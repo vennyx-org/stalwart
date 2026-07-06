@@ -43,8 +43,19 @@ impl Server {
         let Some((local_part, domain_part)) = rcpt.rsplit_once('@') else {
             return Ok(RcptResolution::UnknownDomain);
         };
-        let Some(domain) = self.domain(domain_part).await? else {
-            return Ok(RcptResolution::UnknownDomain);
+        let domain = match self.domain(domain_part).await? {
+            Some(domain) => domain,
+            None => {
+                // --- Vennyx patch: subdomain-RCPT acceptance (see VENNYX-FEASIBILITY.md #5b) ---
+                // `domain_part` isn't itself a registered local domain. Before hard-rejecting,
+                // check whether it's a DIRECT subdomain of one (Migadu-style addressing, e.g.
+                // `user@mail.customer.com` when only `customer.com` is registered) and, if so,
+                // defer entirely to that domain's external directory.
+                if let Some(resolution) = self.rcpt_resolve_subdomain(rcpt, domain_part).await? {
+                    return Ok(resolution);
+                }
+                return Ok(RcptResolution::UnknownDomain);
+            }
         };
 
         // Sub-addressing resolution
@@ -182,6 +193,68 @@ impl Server {
         } else {
             Ok(RcptResolution::UnknownRecipient)
         }
+    }
+
+    // --- Vennyx patch: subdomain-RCPT acceptance (see VENNYX-FEASIBILITY.md #5b) ---
+    //
+    // Migadu-style subdomain addressing (e.g. `anything@sub.customer.com` routing to
+    // `customer.com`'s mailbox for `anything`) requires Stalwart to accept a RCPT
+    // recipient whose domain is a DIRECT subdomain (exactly one extra DNS label) of a
+    // registered local domain, instead of rejecting it before the external directory's
+    // QUERY_RECIPIENT lookup ever runs. This is called from `rcpt_resolve` above ONLY
+    // when `domain_part` did not match any registered domain exactly, so a recipient at
+    // a real local domain is completely unaffected -- this code path is never reached
+    // for it.
+    //
+    // Scoping / anti-open-relay notes:
+    // - Only a SINGLE leftmost label is stripped (`a.b.customer.com` is therefore not a
+    //   "direct" subdomain of `customer.com` -- it would need `b.customer.com` itself to
+    //   be registered, and each strip is independently gated by the same rules below).
+    // - The parent domain must itself already be registered AND already expose an
+    //   external, recipient-lookup-capable directory (e.g. Vennyx Mila's SQL directory,
+    //   which has its own `subdomain_addressing_enabled` gate and `%@%.domain` view
+    //   branch). Domains without such a directory (the common case for vanilla Stalwart
+    //   deployments) never enter this path, so this patch is a no-op for them.
+    // - The accept/reject decision is deferred ENTIRELY to that directory's `recipient()`
+    //   (QUERY_RECIPIENT) lookup for the literal `local@sub.domain` address. Deliberately
+    //   does NOT fall through to the parent domain's own catch-all address or
+    //   `allow_relaying`/`DOMAIN_FLAG_RELAY` flag -- those only ever apply to the parent's
+    //   own exact domain (see `rcpt_resolve` above) and are skipped here on purpose, so
+    //   this cannot be used to relay through a domain that doesn't already delegate
+    //   recipient lookups to an external directory.
+    async fn rcpt_resolve_subdomain(
+        &self,
+        rcpt: &str,
+        domain_part: &str,
+    ) -> trc::Result<Option<RcptResolution>> {
+        let Some((_, parent_domain_part)) = domain_part.split_once('.') else {
+            // No dot left to strip -- not a subdomain of anything.
+            return Ok(None);
+        };
+        if parent_domain_part.is_empty() {
+            return Ok(None);
+        }
+        let Some(parent_domain) = self.domain(parent_domain_part).await? else {
+            return Ok(None);
+        };
+        let Some(directory) = self
+            .get_directory_for_cached_domain(&parent_domain)
+            .filter(|directory| directory.can_lookup_recipients())
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(match directory.recipient(rcpt).await? {
+            Recipient::Account(account) => {
+                Box::pin(self.synchronize_account(account)).await?;
+                RcptResolution::Accept
+            }
+            Recipient::Group(group) => {
+                Box::pin(self.synchronize_group(group)).await?;
+                RcptResolution::Accept
+            }
+            Recipient::Invalid => RcptResolution::UnknownRecipient,
+        }))
     }
 
     pub async fn get_dkim_signers(
