@@ -565,6 +565,11 @@ impl<T: SessionStream> Session<T> {
         // Run SPAM filter
         let mut train_spam = None;
         let mut spam_result = None;
+        // --- Vennyx fork ---
+        // Captured so the DATA-stage MTA hook payload can carry the verdict
+        // (see `crate::inbound::hooks::Spam`). `None` if spam filtering is
+        // disabled/skipped or the session is authenticated (not classified).
+        let mut spam_verdict: Option<super::hooks::Spam> = None;
         if self.server.core.spam.enabled && self.eval_if(&dc.spam_filter).await.unwrap_or(true) {
             match self
                 .spam_classify(
@@ -578,6 +583,12 @@ impl<T: SessionStream> Session<T> {
                 .await
             {
                 SpamFilterAction::Allow(score) => {
+                    // --- Vennyx fork: snapshot verdict for the MTA hook payload ---
+                    spam_verdict = Some(super::hooks::Spam {
+                        score: score.score,
+                        is_spam: score.is_spam,
+                    });
+
                     // Add headers
                     headers.extend_from_slice(score.headers.as_bytes());
                     train_spam = score.train_spam.map(|is_spam| {
@@ -644,7 +655,13 @@ impl<T: SessionStream> Session<T> {
 
         // Run MTA Hooks
         match self
-            .run_mta_hooks(Stage::Data, (&auth_message).into(), message_id.into())
+            .run_mta_hooks(
+                Stage::Data,
+                (&auth_message).into(),
+                message_id.into(),
+                // --- Vennyx fork: forward spam verdict computed above ---
+                spam_verdict,
+            )
             .await
         {
             Ok(modifications_) => {

@@ -32,6 +32,25 @@ pub struct Context {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queue: Option<Queue>,
     pub protocol: Protocol,
+    // --- Vennyx fork ---
+    // Stalwart's spam engine runs at the DATA stage before the MTA hook is
+    // invoked, but the verdict was never surfaced in the hook payload, so
+    // downstream policy engines (e.g. Vennyx Mila's rule engine) had no way
+    // to act on it. Only populated on the `data` stage; `None` elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spam: Option<Spam>,
+}
+
+// --- Vennyx fork ---
+// Minimal snapshot of the spam-filter verdict at the point the DATA-stage
+// hook fires. Mirrors `spam_filter::analysis::score::SpamFilterScore`'s
+// `score`/`is_spam` fields without pulling in the whole spam-filter crate
+// as a dependency of the SMTP hook payload.
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy)]
+pub struct Spam {
+    pub score: f32,
+    #[serde(rename = "isSpam")]
+    pub is_spam: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -191,6 +210,15 @@ pub enum Modification {
     },
     #[serde(rename = "deleteHeader")]
     DeleteHeader { index: u32, name: String },
+    // --- Vennyx fork ---
+    // Overrides one envelope recipient's spam percentage (0-100, values
+    // above 100 are clamped), the per-recipient value local delivery uses to
+    // file the message into Junk (>= 50). Lets a policy engine decide per
+    // recipient, including recipients it added with `addRecipient` (which
+    // otherwise carry no spam verdict). Applied in order with the other
+    // modifications, so it must come after the `addRecipient` it targets.
+    #[serde(rename = "setRecipientSpam")]
+    SetRecipientSpam { value: String, percentage: u8 },
 }
 
 impl From<common::config::smtp::session::Stage> for Stage {
@@ -203,5 +231,49 @@ impl From<common::config::smtp::session::Stage> for Stage {
             common::config::smtp::session::Stage::Rcpt => Stage::Rcpt,
             common::config::smtp::session::Stage::Data => Stage::Data,
         }
+    }
+}
+
+// --- Vennyx fork ---
+#[cfg(test)]
+mod vennyx_tests {
+    use super::{Modification, Response, Spam};
+
+    #[test]
+    fn parses_set_recipient_spam() {
+        let response: Response = serde_json::from_str(
+            r#"{"action":"accept","modifications":[
+                {"type":"addRecipient","value":"b@example.com"},
+                {"type":"setRecipientSpam","value":"b@example.com","percentage":100}
+            ]}"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            response.modifications.as_slice(),
+            [
+                Modification::AddRecipient { .. },
+                Modification::SetRecipientSpam { value, percentage: 100 }
+            ] if value == "b@example.com"
+        ));
+    }
+
+    #[test]
+    fn rejects_an_out_of_range_percentage() {
+        assert!(
+            serde_json::from_str::<Response>(
+                r#"{"action":"accept","modifications":[{"type":"setRecipientSpam","value":"b@example.com","percentage":300}]}"#,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn serializes_the_spam_verdict() {
+        let json = serde_json::to_string(&Spam {
+            score: 6.5,
+            is_spam: true,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"score":6.5,"isSpam":true}"#);
     }
 }

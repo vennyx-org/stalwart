@@ -8,7 +8,7 @@ use super::{Action, Error, Macros, Modification};
 use crate::{
     core::{Session, SessionAddress, SessionData},
     inbound::{FilterResponse, milter::MilterClient},
-    queue::QueueId,
+    queue::{QueueId, RCPT_SPAM_MASK, rcpt_spam_flag},
 };
 use common::{
     DAEMON_NAME,
@@ -412,6 +412,21 @@ impl SessionData {
                 }
                 Modification::Quarantine { reason } => {
                     header_changes.push((0, "X-Quarantine".into(), reason, false));
+                }
+                Modification::SetRcptSpam {
+                    recipient,
+                    percentage,
+                } => {
+                    // --- Vennyx fork: per-recipient spam verdict from an MTA hook ---
+                    let recipient = strip_brackets(&recipient).to_lowercase();
+                    if let Some(rcpt) = self
+                        .rcpt_to
+                        .iter_mut()
+                        .find(|rcpt| rcpt.address_lcase == recipient)
+                    {
+                        rcpt.flags = (rcpt.flags & !RCPT_SPAM_MASK)
+                            | rcpt_spam_flag(percentage.min(100));
+                    }
                 }
             }
         }

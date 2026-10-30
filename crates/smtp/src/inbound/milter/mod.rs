@@ -140,6 +140,11 @@ pub enum Modification {
     Quarantine {
         reason: String,
     },
+    // --- Vennyx fork: produced only by MTA hooks (`setRecipientSpam`) ---
+    SetRcptSpam {
+        recipient: String,
+        percentage: u8,
+    },
 }
 
 #[derive(Debug)]
@@ -325,6 +330,14 @@ impl Display for Modification {
                 write!(f, "CHANGE_HEADER (index: {}, {}: {})", index, name, value)
             }
             Modification::Quarantine { reason } => write!(f, "QUARANTINE ({})", reason),
+            Modification::SetRcptSpam {
+                recipient,
+                percentage,
+            } => write!(
+                f,
+                "SET_RCPT_SPAM (recipient: {}, percentage: {})",
+                recipient, percentage
+            ),
             Modification::ChangeFrom { sender, args } => {
                 write!(f, "CHANGE_FROM (<{}> {})", sender, args)
             }

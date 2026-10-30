@@ -9,6 +9,24 @@ Workspace layout: 26 crates under `crates/`, largest relevant ones for this reco
 
 ---
 
+## 1.0 line (`vennyx/deploy-1.0`, based on v1.0.1)
+
+Carried over from the 0.16 line: patch 1 (spam verdict in the DATA-stage hook
+payload) and patch 2 (direct-subdomain RCPT), both re-applied by hand to the
+1.0 code; the OpenTelemetry mirror pin is gone (1.0 has no opentelemetry crates).
+
+New on this line, owner-approved (2026-10-30): **per-recipient spam override
+from the MTA hook.** A hook response can carry
+`{"type":"setRecipientSpam","value":"<rcpt>","percentage":0-100}`. It sets that
+envelope recipient's spam percentage (`RCPT_SPAM_MASK` flags), the value local
+delivery uses to file the copy into Junk (>= 50). It is applied in order with
+the other modifications, so it can target a recipient the same response added
+with `addRecipient`; recipients added that way otherwise carry no verdict and
+never reach Junk. A recipient that is not in the envelope is ignored. A value
+above 255 fails the whole response, so callers must send 0-100.
+
+---
+
 ## 1. Spam verdict in MTA-hook payload — IMPLEMENTED (this session)
 
 **Tractability: Easy.** Confirmed and shipped on branch `vennyx/spam-verdict-in-hook` (off `vennyx/base`).

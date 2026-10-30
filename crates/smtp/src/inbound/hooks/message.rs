@@ -10,7 +10,8 @@ use crate::{
     inbound::{
         FilterResponse,
         hooks::{
-            Address, Client, Context, Envelope, Message, Protocol, Request, Sasl, Server, Tls,
+            Address, Client, Context, Envelope, Message, Protocol, Request, Sasl, Server, Spam,
+            Tls,
         },
         milter::Modification,
     },
@@ -29,6 +30,8 @@ impl<T: SessionStream> Session<T> {
         stage: Stage,
         message: Option<&AuthenticatedMessage<'_>>,
         queue_id: Option<QueueId>,
+        // --- Vennyx fork: spam-filter verdict, only known at the `data` stage ---
+        spam: Option<Spam>,
     ) -> Result<Vec<Modification>, FilterResponse> {
         let mta_hooks = &self.server.core.smtp.session.hooks;
         if mta_hooks.is_empty() {
@@ -56,7 +59,7 @@ impl<T: SessionStream> Session<T> {
                 .iter()
                 .any(|next| next.run_on_stage.contains(&stage));
             let result = match payload
-                .get_or_insert_with(|| self.mta_hook_payload(stage, message, queue_id))
+                .get_or_insert_with(|| self.mta_hook_payload(stage, message, queue_id, spam))
             {
                 Ok(body) if has_next => send_mta_hook_request(mta_hook, body.clone()).await,
                 Ok(body) => send_mta_hook_request(mta_hook, std::mem::take(body)).await,
@@ -114,6 +117,13 @@ impl<T: SessionStream> Session<T> {
                                     index,
                                     name,
                                     value: String::new(),
+                                }
+                            }
+                            // --- Vennyx fork ---
+                            super::Modification::SetRecipientSpam { value, percentage } => {
+                                Modification::SetRcptSpam {
+                                    recipient: value,
+                                    percentage,
                                 }
                             }
                         });
@@ -184,6 +194,8 @@ impl<T: SessionStream> Session<T> {
         stage: Stage,
         message: Option<&AuthenticatedMessage<'_>>,
         queue_id: Option<QueueId>,
+        // --- Vennyx fork: spam-filter verdict, only known at the `data` stage ---
+        spam: Option<Spam>,
     ) -> Result<Vec<u8>, String> {
         let (tls_version, tls_cipher) = self.stream.tls_version_and_cipher();
         let request = Request {
@@ -223,6 +235,8 @@ impl<T: SessionStream> Session<T> {
                     id: format!("{:x}", id),
                 }),
                 protocol: Protocol { version: 1 },
+                // --- Vennyx fork: see `Spam` for rationale ---
+                spam,
             },
             envelope: self.data.mail_from.as_ref().map(|from| Envelope {
                 from: Address {
