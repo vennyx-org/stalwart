@@ -9,12 +9,15 @@ name: "Vennyx image build"
 # (chef -> builder -> debian-slim runtime) instead of the heavier
 # multi-arch pipeline.
 #
-# Triggers: manual (workflow_dispatch) or push to vennyx/deploy.
-# Image: ghcr.io/vennyx-org/stalwart:vennyx-<short-sha> and :vennyx-latest
+# Triggers: manual (workflow_dispatch) or push to vennyx/deploy or
+# vennyx/deploy-1.0 (the Stalwart 1.0 line, staged before it replaces
+# vennyx/deploy).
+# Image: ghcr.io/vennyx-org/stalwart:vennyx-<short-sha>; only vennyx/deploy
+# also moves :vennyx-latest. Prod pins a vennyx-<short-sha> tag.
 
 on:
   push:
-    branches: ["vennyx/deploy"]
+    branches: ["vennyx/deploy", "vennyx/deploy-1.0"]
   workflow_dispatch: {}
 
 concurrency:
@@ -62,7 +65,7 @@ jobs:
           provenance: false
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:vennyx-${{ steps.vars.outputs.short_sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:vennyx-latest
+            ${{ github.ref == 'refs/heads/vennyx/deploy' && format('{0}/{1}:vennyx-latest', env.REGISTRY, env.IMAGE_NAME) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -74,5 +77,7 @@ jobs:
             echo "### Vennyx Stalwart image published"
             echo ""
             echo "- \`${REGISTRY}/${IMAGE_NAME}:vennyx-${SHORT_SHA}\`"
-            echo "- \`${REGISTRY}/${IMAGE_NAME}:vennyx-latest\`"
+            if [ "$GITHUB_REF" = "refs/heads/vennyx/deploy" ]; then
+              echo "- \`${REGISTRY}/${IMAGE_NAME}:vennyx-latest\`"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
