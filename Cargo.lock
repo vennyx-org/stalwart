@@ -5440,8 +5440,8 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.0"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -5453,8 +5453,8 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-http"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.0"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5465,8 +5465,8 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-otlp"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.0"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 dependencies = [
  "http 1.5.0",
  "httpdate",
@@ -5484,8 +5484,8 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-proto"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.0"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
@@ -5496,13 +5496,13 @@ dependencies = [
 
 [[package]]
 name = "opentelemetry-semantic-conventions"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.1"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 
 [[package]]
 name = "opentelemetry_sdk"
-version = "0.33.0"
-source = "git+https://github.com/stalwartlabs/opentelemetry-rust#ae66e97b140f70e477ab710686aafce665cc2f8b"
+version = "0.32.1"
+source = "git+https://github.com/vennyx-org/opentelemetry-rust?rev=80a14a3b6846f62f85506d68d2600c948fccc9d2#80a14a3b6846f62f85506d68d2600c948fccc9d2"
 dependencies = [
  "futures-channel",
  "futures-executor",
